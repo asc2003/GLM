@@ -1,0 +1,1015 @@
+---
+title: "Untitled"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-12-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Participants
+Àlex Soler Carballo
+
+Les dades seran extretes de dades_64.txt
+
+# Llibreríes
+```{r}
+library(FactoMineR)
+library(car)
+library(lmtest)
+library(effects)
+library(ROCR)
+library(AUC)
+library(caret)
+library(ggplot2)
+```
+
+# Lectura de dades
+```{r}
+dades<-read.table("dades_64.txt",header=T)
+summary(dades)
+```
+
+# Preprocessament de les dades
+```{r}
+#Passem a factor
+dades$sexe<-as.factor(dades$sexe)
+
+dades$visites_prev<-as.factor(dades$visites_prev)
+
+#Variable resposta com a factor
+dades$visita<-factor(dades$y,labels=c("No_visita","Si_visita"))
+
+#Variable auxiliar per si agraguem dades
+#dades$ones<-rep(1,length(dades$y))
+dades$ID<-NULL
+```
+
+# Part inicial
+Categòriques: sexe,visites_prev
+Numèriques: FEV,edat,PAS,temps
+Resposta:y/visita,n
+## 1. Descriptiva
+### a.Univariada
+```{r}
+par(mfrow=c(1,3),las=2)
+barplot(table(dades$sexe),col=c(2,3))
+barplot(table(dades$visites_prev),col=c(2,3))
+barplot(table(dades$visita),col=c(2,3))
+```
+Sembla que dades visites_prev estan desbalancejades, repartides entre 20% no 80% si. Pero a lo millor segueix sent útil (serie inútil si el 90% o mes fossin d'una categoria). La variable resposta i l'altre categòrica si que estan balancejades
+
+```{r}
+par(mfrow=c(1,3),las=2)
+hist(dades$FEV)
+hist(dades$edat)
+hist(dades$PAS)
+par(mfrow=c(1,2),las=2)
+hist(dades$temps)
+hist(dades$n)
+```
+Podem observar com la variable resposta de recomptes té molts 0 (possible poisson zero inflada)
+```{r}
+shapiro.test(dades$PAS)
+```
+
+### b. Bivariada
+#### Var resposta y/visita
+```{r}
+response <- which(names(dades[,c(-7,-8)])=='visita')
+catdes(dades[,c(-7,-8)],num.var=response)
+```
+Podem observar com les variables que tenen relació amb la variable resposta visita/y son: Sexe, temps, FEV
+
+```{r}
+
+par(mfrow=c(1,2),las=1)
+Boxplot(FEV~visita, data = dades, col=2:3)
+Boxplot(temps~visita,data = dades, col=2:3)
+par(mfrow=c(1,2),las=1)
+Boxplot(PAS~visita,data = dades, col=2:3)
+Boxplot(edat~visita,data = dades, col=2:3)
+```
+Veiem gràficament com si tenim diferències segons nivell resposta per FEV i temps però en les altres dues veiem que els boxplots son pràcticament iguals (indicant que aquestes dues pot ser no serveixen de molt per explicar visita/y)
+
+```{r}
+par(mfrow=c(1,2),las=1)
+plot(visita~sexe,  data = dades, col=3:2)
+plot(visita~visites_prev,  data = dades, col=3:2)
+```
+Aquí veiem el mateix que en tests, sexe si que te diferents proporcions en canvi visites_prev son semblants.
+
+#### Var resposta n recomptes
+```{r}
+par(mfrow=c(1,2))
+plot(dades$n~dades$sexe,col=c(2,3),ylim=c(0,5))
+plot(dades$n~dades$visites_prev,col=c(2,3),ylim=c(0,5))
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(dades$n~dades$FEV)
+plot(dades$n~dades$edat)
+par(mfrow=c(1,2))
+plot(dades$n~dades$PAS)
+plot(dades$n~dades$temps)
+```
+
+
+# Resposta binaria
+## Ajustar model amb funcio logit
+Posem totes les vars de forma aditiva i totes possibles interaccions ordre 1 amb al menys una variable categòrica
+```{r}
+mod0 <- glm(visita ~ sexe+visites_prev+FEV+edat+PAS+temps+
+              sexe:visites_prev+sexe:FEV+sexe:edat+sexe:PAS+sexe:temps+
+              visites_prev:FEV+visites_prev:edat+visites_prev:PAS+visites_prev:temps,
+            family = binomial(link = "logit"), data=dades)
+
+# Fem selecció automàtica per tenir una orientació
+mod0.1 <- step(mod0,direction="both",k=2,trace=FALSE) #Segons AIC on es busca predictibilitat
+mod0.2 <- step(mod0,direction="both",k=log(nrow(dades)),trace=FALSE) #segons BIC on es busca explicabilitat
+Anova(mod0.1)
+Anova(mod0.2)
+```
+
+Pel primer model al utilitzar criteri AIC ens surten coeficients no significatius i amb BIC veiem que ens surten moltes menys variables i totes significatives. El que farem nosaltres serà fer una selecció manual per trobar un model que estigui entre aquests dos ja que busquem explicabilitat i predictibilitat.
+
+```{r}
+residualPlot(mod0.1,ylim=c(-2,2))
+residualPlot(mod0.2,ylim=c(-2,2))
+```
+
+
+### FEV
+```{r}
+m1<-glm(visita ~ FEV,
+            family = binomial(link = "logit"), data=dades)
+Anova(m1)
+par(mfrow=c(1,2))
+plot(m1)[c(3,4)]
+residualPlots(m1)
+marginalModelPlots(m1)
+plot(allEffects(m1),ask=FALSE)
+```
+Veiem que no acaba d'ajustar-se bé a les dades. També podem veure com hi han possibles outliers
+
+#### Poly 2n grau i 3r grau
+```{r}
+dades$FEV2<-(dades$FEV-100)^2
+dades$FEV3<-(dades$FEV-100)^3
+
+m1.2<-glm(visita ~ FEV+FEV2,
+            family = binomial(link = "logit"), data=dades)
+m1.3<-glm(visita ~ FEV+FEV2+FEV3,
+            family = binomial(link = "logit"), data=dades)
+
+m1.2p<-glm(visita ~ poly(FEV,2),
+            family = binomial(link = "logit"), data=dades)
+m1.3p<-glm(visita ~ poly(FEV,3),
+            family = binomial(link = "logit"), data=dades)
+anova(m1.3p,m1.2p,test="Chisq")
+
+anova(m1,m1.2,test="Chisq")
+waldtest(m1,m1.2,test="Chisq")
+AIC(m1.2p,m1)
+BIC(m1.2p,m1)
+
+anova(m1,m1.2p,test="Chisq")
+waldtest(m1,m1.2,test="Chisq")
+
+residualPlot(m1.2,ylim=c(-1,2))
+residualPlots(m1)
+```
+Terme cúbic no necessari. Després veiem que el terme quadràtic surt no significatiu per poc, llavors ens fixem en AIC i BIC on  veiem que BIC es més o menys semblants (una mica pitjor amb terme quadràtic) però com el nostre criteri principal és l'AIC, llavors ens quedarem amb el terme quadràtic.
+
+#### Intentem introudirla com a factor
+La passarem com a factor tenint en compte que entre 80-120 es normal, <80 baixa, >120 alta
+```{r,warning=F}
+dades$c.FEV <- cut(dades$FEV,breaks=c(49,79,120,151),labels=c("<80","80-120",">120"))
+m1.c <- glm(visita~c.FEV,data=dades,family=binomial)
+m2.c <- glm(visita ~ c.FEV + poly(FEV,2),data=dades,family=binomial)
+anova(m1.c,m2.c,test="Chisq")
+anova(m1.2p,m2.c,test="Chisq")
+
+AIC(m1.c)
+AIC(m1.2p)
+
+m2.c <- glm(visita ~ c.FEV + FEV,data=dades,family=binomial)
+anova(m1.c,m2.c,test="Chisq")
+anova(m1,m2.c,test="Chisq")
+
+AIC(m1.c)
+AIC(m1)
+
+residualPlots(m1.c)
+```
+Amb anova estem veient que es millor afegir terme quadràtic a categoritzar ja que ens diu que al afegir terme quadràtic millora model i a l'inversa no. També ho comparem amb FEV normal i es millor el FEV sense tocar
+
+Al final deixem la variable FEV amb terme quadràtic
+
+### Temps
+```{r}
+m2.1<-glm(visita ~ poly(FEV,2)+temps,
+            family = binomial(link = "logit"), data=dades)
+#Comprovem linealitat de temps
+m2.2<-glm(visita ~ poly(FEV,2)+poly(temps,2),
+            family = binomial(link = "logit"), data=dades)
+m2.3<-glm(visita ~ poly(FEV,2)+poly(temps,3),
+            family = binomial(link = "logit"), data=dades)
+anova(m2.1,m2.2,test="Chisq")
+anova(m2.3,m2.2,test="Chisq")
+Anova(m2.1)
+```
+No es necessari ni terme cúbic ni quadràtic. Ens quedem amb temps de forma aditiva. Tampoc posem interacció
+*Mirem ajust del model*
+```{r}
+residualPlot(m2.1)
+residualPlots(m2.1) #BO PER MIRAR QUE FA FALLAR AL MODEL
+marginalModelPlots(m2.1) 
+
+AIC(m1.2p)
+AIC(m2.1)
+BIC(m1.2p)
+BIC(m2.1)
+```
+Podem veure com residuos no del tot explicats. La variable temps no la modificarem perquè si que explica bé els residuos. En Marginal model plot veiem com el model ajusta bastante bé les dades. Pero intentarem afegir més variables per intentar millorar els residuos
+
+### Edat
+```{r}
+m3.1<-glm(visita ~ poly(FEV,2)+temps+edat,
+            family = binomial(link = "logit"), data=dades)
+anova(m3.1,m2.1,test="Chisq") #terme edat rebutjat per poc
+AIC(m3.1,m2.1)
+BIC(m3.1,m2.1)
+m3.2<-glm(visita ~ poly(FEV,2)+temps+poly(edat,2),
+            family = binomial(link = "logit"), data=dades)
+anova(m3.2,m2.1,test="Chisq") #tampoc al quadrat
+```
+#### Categoritzar edat
+```{r}
+dades$c.edat <- cut(dades$edat,breaks=c(-Inf,30,60,Inf),labels=c("<30","30-60",">60"))
+m3.c<-glm(visita ~ poly(FEV,2)+temps+c.edat,
+            family = binomial(link = "logit"), data=dades)
+anova(m3.c,m2.1,test="Chisq")
+```
+Edat categoritzada és pitjor. Veiem que edat es rebutjada per poc, així que mirem criteri AIC i veiem com si millora una mica. Inclourem la variable edat
+
+```{r}
+residualPlot(m3.1,ylim=c(-2,2))
+```
+
+
+### PAS
+```{r}
+m4.1<-glm(visita ~ poly(FEV,2)+temps+PAS+edat,
+            family = binomial(link = "logit"), data=dades)
+#anova(m4.1,m2.1,test="Chisq")
+anova(m4.1,m3.1,test="Chisq")
+```
+Es no significativa per molt. Era de esperar ja que en els boxplots ja hem vist com tenien distribucions semblants pels diferents nivells de visita
+
+Passem a les *categòriques*. Ja hem afegit totes les numèriques útils
+
+### Sexe
+```{r}
+m5.1<-glm(visita ~ poly(FEV,2)+edat+temps+sexe,
+            family = binomial(link = "logit"), data=dades)
+#anova(m5.1,m2.1,test="Chisq")
+anova(m5.1,m3.1,test="Chisq")
+```
+Molt significativa, intentem validar el model
+
+```{r}
+residualPlot(m5.1)
+residualPlots(m5.1) #BO PER MIRAR QUE FA FALLAR AL MODEL
+marginalModelPlots(m5.1)
+```
+Els residuos no es podem validar del tot encara que hi ha hagut petita millora. Veiem ara que les dades estan millor ajustades. Es possible que la part que fa que el model no s'acabi de validar sigui FEV on encara tenim una lleugera pendent en els residuos. Intentem introduir interaccions (encara que provem totes le que fa sentit es la de sexe amb FEV)
+
+```{r}
+m5.2<-glm(visita ~ FEV*sexe+FEV2+temps+edat,
+            family = binomial(link = "logit"), data=dades)
+m5.3<-glm(visita ~ FEV2+FEV+sexe*edat+temps,
+            family = binomial(link = "logit"), data=dades)
+m5.4<-glm(visita ~ poly(FEV,2)*sexe+temps+edat,
+            family = binomial(link = "logit"), data=dades)
+anova(m5.1,m5.3,test="Chisq")
+anova(m5.1,m5.2,test="Chisq")
+anova(m5.2,m5.4,test="Chisq")
+BIC(m5.2,m5.1)
+AIC(m5.2,m5.1)
+```
+Descartem interacció sexe temps i sexe amb poly(FEV,2) pero veiem que sexe:FEV surt no significatiu per poc. Mirant AIC veiem que millora respecte el model anterior sense que empitjori molt BIC. Així que com criteri principal AIC afegim interacció.
+```{r}
+residualPlot(m5.2,ylim=c(-2,2),xlim=c(-4.5,3))
+residualPlot(m5.1,ylim=c(-2,2),xlim=c(-4.5,3))
+residualPlots(m5.2) #BO PER MIRAR QUE FA FALLAR AL MODEL
+marginalModelPlots(m5.2)
+```
+
+Introduim interacció encara que no podem acabar de validar. Com hem afegit interacció mirem si ara es necessari el terme quadràtic.
+```{r}
+m5.2<-glm(visita ~ FEV*sexe+FEV2+temps+edat,
+            family = binomial(link = "logit"), data=dades)
+m5.5<-glm(visita ~ FEV*sexe+temps+edat,
+            family = binomial(link = "logit"), data=dades)
+anova(m5.2,m5.5,test="Chisq")
+Anova(m5.5)
+m5.6<-glm(visita ~ FEV*sexe+temps,
+            family = binomial(link = "logit"), data=dades)
+m5<-m5.6
+```
+Surten que els models son equivalents. Es rebutja la significació de FEV2 per bastant. Treiem terme quadràtic.
+```{r}
+residualPlot(m5,ylim=c(-2,2))
+residualPlots(m5) #BO PER MIRAR QUE FA FALLAR AL MODEL
+marginalModelPlot(m5)
+Anova(m5)
+```
+
+
+Provem a introduir última variable
+
+### visites_prev
+
+```{r}
+m6.1<-glm(visita ~ FEV*sexe+temps+visites_prev,
+            family = binomial(link = "logit"), data=dades)
+anova(m6.1,m5,test="Chisq")
+par(mfrow=c(1,2))
+residualPlot(m6.1)
+residualPlot(m5)
+AIC(m6.1,m5)
+BIC(m6.1,m5)
+```
+Surt no significatiu per poc. Mirem AIC i veiem que millora una mica, també tenim en compte BIC que encara que sigui pitjor no el fa baixar molt. Introduim variable  mirarem d'introduir alguna interacció
+
+```{r}
+m6.2<-glm(visita ~ FEV*sexe+FEV:visites_prev+visites_prev+temps,
+            family = binomial(link = "logit"), data=dades)
+m6.3<-glm(visita ~ FEV*sexe+sexe:visites_prev+visites_prev+temps,
+            family = binomial(link = "logit"), data=dades)
+anova(m6.1,m6.2,test="Chisq")
+anova(m6.3,m6.1,test="Chisq")
+```
+Surten no significatives per molt. No introduirem interacció. (Tenint en compte que només mirem interaccions de 1er ordre)
+
+
+```{r,warning=F}
+m7<-m6.1
+marginalModelPlots(m7) #veiem com model no ajusta perfectament les dades
+plot(allEffects(m7))
+residualPlot(m7)
+```
+
+
+## 5. Comparació links
+```{r}
+mf<-glm(visita ~ FEV*sexe+temps+visites_prev,
+            family = binomial(link = "logit"), data=dades)
+mf.prob<-glm(visita ~ FEV*sexe+temps+visites_prev,
+            family = binomial(link = "probit"), data=dades)
+mf.cll<-glm(visita ~ FEV*sexe+temps+visites_prev,
+            family = binomial(link = "cloglog"), data=dades)
+
+```
+
+```{r}
+df<-data.frame(BIC=c(BIC(mf),BIC(mf.prob),BIC(mf.cll)),AIC=c(AIC(mf),AIC(mf.prob),AIC(mf.cll)),row.names=c("Logit","Probit","Cloglog"))
+df
+Anova(mf)
+```
+
+Veiem que el cloglog es el pitjor per qualsevol dels criteris. I probit i logit son molt semblants. Com no millora ningún dels dos ni en 1 unitat, ens quedarem amb funció Logit perquè es més interpretable i es el link per defecte.
+
+## 6.Validació model
+
+```{r}
+#Funció per calcular pseudo-R2
+R2<-function(x){
+  res<-c()
+  for(i in 1:length(x)){
+    res<-c(res,100*(1-x[[i]]$dev/x[[i]]$null.dev))
+  }
+  return(res)
+}
+```
+
+```{r}
+df<-data.frame(AIC=c(AIC(mod0.1,mod0.2,mod0,m1,m1.2,m1.2p,m1.3,m1.3p,m1.c,m2.1,m2.2,m2.3,m2.c,m3.1,m3.2,m3.c,m4.1,m5,m5.1,m5.2,m5.3,m5.4,m5.5,m5.6,m6.2,m6.3,mf,mf.prob,mf.cll)),BIC=c(BIC(mod0.1,mod0.2,mod0,m1,m1.2,m1.2p,m1.3,m1.3p,m1.c,m2.1,m2.2,m2.3,m2.c,m3.1,m3.2,m3.c,m4.1,m5,m5.1,m5.2,m5.3,m5.4,m5.5,m5.6,m6.2,m6.3,mf,mf.prob,mf.cll)),Dev=c(deviance(mod0.1),deviance(mod0.2),deviance(mod0),deviance(m1),deviance(m1.2),deviance(m1.2p),deviance(m1.3),deviance(m1.3p),deviance(m1.c),deviance(m2.1),deviance(m2.2),deviance(m2.3),deviance(m2.c),deviance(m3.1),deviance(m3.2),deviance(m3.c),deviance(m4.1),deviance(m5),deviance(m5.1),deviance(m5.2),deviance(m5.3),deviance(m5.4),deviance(m5.5),deviance(m5.6),deviance(m6.2),deviance(m6.3),deviance(mf),deviance(mf.prob),deviance(mf.cll)),PseudoR2=c(R2(list(mod0.1,mod0.2,mod0,m1,m1.2,m1.2p,m1.3,m1.3p,m1.c,m2.1,m2.2,m2.3,m2.c,m3.1,m3.2,m3.c,m4.1,m5,m5.1,m5.2,m5.3,m5.4,m5.5,m5.6,m6.2,m6.3,mf,mf.prob,mf.cll))))
+
+df$BIC.df<-c("mod0.1","mod0.2","mod0","m1","m1.2","m1.2p","m1.3","m1.3p","m1.c","m2.1","m2.2","m2.3","m2.c","m3.1","m3.2","m3.c","m4.1","m5","m5.1","m5.2","m5.3","m5.4","m5.5","m5.6","m6.2","m6.3","mf","mf.prob","mf.cll")
+
+colnames(df)<-c("num.params","AIC","model","BIC","Dev","PseudoR2")
+
+df[order(df$AIC),c(1,3,2,4,5,6)]
+library(writexl)
+#write_xlsx(df[order(df$AIC),c(1,3,2,4,5,6)],path="./df.xlsx")
+```
+Encara que veiem que millor AIC siguin els de mod0.1, m6.1 i després el nostre model escollit (molt semblant a mf.prob), veiem com els BIC del sdos primers son molt dolents respecte el nostres ja que encara que en tot moment ens hem guiat pel AIC, també hem aconseguit que dels models probats, el nostre sigui el que tingui un BIC més baix.
+
+
+```{r,warning=F}
+marginalModelPlot(mf)
+marginalModelPlot(mf)
+```
+S'ajusta prou bé a les dades el model, encara que al final difereix una mica. Aquest desajust es provocat per la variable FEV, la forma de solucionar-ho seria afegint la variable FEV2, pero com no es veu molt greu mirarem abans capacitat predictiva.
+
+```{r}
+plot(allEffects(mf))
+```
+On podem confirmar que hi ha interacció, com ja sospitavem a lo millor podriem treure visites_prev ja que es solapen les categories, després comprovem com el temps és lineal.
+
+```{r}
+residualPlot(mf)
+```
+Veiem que no es pot acabar de validar ja que no tenim tendencia central lineal. Mirem quina de les variables ho provoca (com hem anat veient es probable que sigui FEV)
+
+```{r}
+residualPlots(mf)
+```
+Veiem pendent en la variable FEV. Com ja no podiem introduir més canvis per millorar-ho, mirarem els outliers
+
+**Outliers i Punts influents**
+
+```{r warning=FALSE}
+##-- Outliers i punts influents
+plot(mf,5)
+outlierTest(mf) #surt 1 outlier
+outliers<-as.numeric(which(cooks.distance(mf)>4/500))
+dades[outliers,c("sexe","FEV","edat","PAS","temps","n","y")]
+influenceIndexPlot(mf,label=row.names(dades),
+                   vars=c("Cook", "Student","hat"), id=list(n=5))
+influencePlot(mf,label=row.names(dades), id=list(n=5))
+#cook 4/500
+```
+En 1er gràfic veiem com tenim residus de pearson elevats. Especialment hi han dos que passan del -4, 4. Mirant les observacions amb distància de cook elevades veiem com no hi ha ningún outlier produït per un error així que no els podem eliminar. Amb tots els gràfics veiem com tenim punts amb influencia a priori i a posteriori i també residuos que estan mal explicats.
+
+*Canvi en les betes*
+```{r}
+par(mfrow=c(2,2))
+dfb <- dfbetas(mf)
+ndb1<-c()
+for(i in 1:6){
+  plot(abs(dfb[,i]),type='h',main=names(coef(mf))[i])
+  abline(h=2/sqrt(500))
+  ndb1<-c(ndb1,as.numeric(which(abs(dfb[,i])>2/sqrt(500))))
+} #4/sqrt(n)=0.089
+
+#Si ponemos limite en 2/sqrt(500) como en teoria vemos que  afecta a los 4 coeficientes, pero si ponemos como en els laboratoris 4/sqrt(500) no afecta a ninguno
+par(mfrow=c(2,2))
+dfb <- dfbetas(mf)
+ndb2<-c()
+for(i in 1:6){
+  plot(abs(dfb[,i]),type='h',main=names(coef(mf))[i])
+  abline(h=4/sqrt(500))
+  ndb2<-c(ndb2,as.numeric(which(abs(dfb[,i])>4/sqrt(500))))
+}
+length(ndb1)
+length(ndb2)
+length(unique(ndb1))
+length(unique(ndb2))
+```
+Aquí mirem la influencia que té cada observació en cada coeficient. Si utilitzem el límit de la teoria veim que tenim per tots els coeficients varies observacions que els influencien. Utilitzan el límit vist al laboratori, el número d'observacions que influencien en els coeficients baixen:
+- Intercept --> 3
+- FEV --> 4
+- Temps --> 0
+I per l'interacció ninguna observació.
+
+*Dffits*
+```{r}
+p<-length(coef(mf))
+plot(dffits(mf))
+abline(h=2*sqrt(p/500))
+abline(h=-2*sqrt(p/500))
+sum(abs(dffits(mf))>2*sqrt(p/500))
+```
+Després d'evaluar com cada observació influeix en la seva pròpia predicció, veiem que si hi han algunes que ho fan.
+
+Així que podem concluir que el model es robust y en general estable encara que haguem obtingut dffits elevats perquè els coeficients no son altament sensibles per cap observació (dfbeta), per tant, encara que algunes observacions afectin a les seves prediccions, no ho fan per l'estimació dels coeficients de les betes. Encara que tenim valors atípics (residuos standaritzats que passan del -4 o 4) no sembla que influenciin molt. I els que tenen una distància de cook elevada ja hem comprovat que no son errors així que els deixem en el model.
+
+Ara amb estadístic HM i el calibration.plot acabarem de validar model
+*Hosmer-Lemershow*
+```{r}
+seque <- c(0,seq(0.2,0.95,by=0.05))
+dades$fitgrup <- cut(fitted(mf),breaks=seque)
+(cfitgrup <- table(dades$y,dades$fitgrup))
+(csample  <- tapply(dades$y,dades$fitgrup,sum))
+(cmodel   <- tapply(fitted(mf),dades$fitgrup,sum))
+(XHL <- sum(((cmodel-csample)^2)/cmodel))
+1-pchisq(XHL,length(seque)-1)  
+```
+
+*Calibration plot*
+```{r}
+df <- data.frame(obs = factor(dades$y),  # observat
+                 pre = 1-fitted(mf)) # predit
+calPlotData <- calibration(obs ~ pre, data = df)
+
+plot(calPlotData)
+```
+
+El calibration.plot no sembla molt bo però afegirem els IC per veure si estan o no en la bisectriu
+```{r}
+calPlotData <- calibration(obs ~ pre, data = df)
+
+library(ggplot2)
+
+ggplot(calPlotData, aes(x = midpoint, y = Percent / 100)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.05) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Calibration Plot",
+       x = "Predicted Probability",
+       y = "Observed Proportion") +
+  theme_minimal()
+```
+Veiem que tots els IC cauen dins la bisectriu, per tant, estadísticament les probabilitats predites i les observades son equivalents.
+
+Comprovem que segons l'estadístic HM i el calibration.plot el model és bo
+
+
+## 7. Capacitat predictiva
+
+*Anàlisi corba ROC*
+```{r}
+pr <- predict(mf,type="response")
+y <- dades$y
+boxplot(pr~y)  
+```
+Les probabilitats predites pels que si han fet alguna visita son més altes
+
+```{r}
+plot(roc(pr,factor(y)))
+auc(roc(pr,factor(y)))
+```
+Tenim que el AUC es de 0.82 que és acceptable
+
+```{r}
+# Corba ROC
+dadesroc <- prediction(pr,y)
+par(mfrow=c(1,2))
+roc.perf <- performance(dadesroc,"auc",fpr.stop=0.05)
+plot(performance(dadesroc,"err"))
+plot(performance(dadesroc,"tpr","fpr"))
+```
+Veiem que el punt de tall òptim està al voltant de 0.4 per maximitzar la capacitat predictiva.
+
+```{r}
+prob.visita <- mf$fit
+visita.est <- ifelse(prob.visita<0.4,0,1)
+(t <- table(visita.est,dades$y)) 
+```
+*Proporció d'encerts*
+```{r}
+sum(diag(t))/sum(t)
+```
+
+*Sensibilitat*
+```{r}
+t[2,2]/sum(t[,2])
+```
+
+*Especificitat*
+```{r}
+t[1,1]/sum(t[,1])
+```
+
+*Valor predictiu positiu*
+```{r}
+t[2,2]/sum(t[2,])  
+```
+
+*Valor predictiu negatiu*
+```{r}
+t[1,1]/sum(t[1,]) 
+```
+
+```{r}
+# Model naive (prob. d anar votat si no sabem res)
+m0 <- glm(y ~ 1, family=binomial, data=dades)
+prob.visit <- m0$fit
+visit.est <- ifelse(prob.visit<0.4,0,1)
+t2 <- table(visit.est,dades$y)
+t2[1,2]/sum(t2)
+```
+Amb el model naive (si no sabem res) la proporció d'encerts passa de 75.8% del nostre model a un 34.2%
+
+
+*Pseudo-$R^2$*
+```{r}
+100*(1-mf$dev/mf$null.dev)
+100*(1-(logLik(mf)/mf$df.residual)/(logLik(m0)/(m0$df.residual)))
+```
+Tenim un pseudo-R2 baix: 0.25
+
+
+## 8. Interpretació coeficients
+
+```{r}
+mf
+```
+$$log(\frac{\pi}{1-\pi})=\beta_0+\beta_1FEV+\beta_2sexe_{home}+\beta_3temps+\beta_4visitesprev_{si}+\beta_{12}FEV:sexe_{home}$$
+Hem de tenir en compte que els nivells de referencia son dona i no en visites prèvies.
+Numèric
+
+Com tenim funció link=logit el coeficient representa les logodds així que per poder extreure les odds em de fer exponencial
+```{r}
+mf$coef[4]
+exp(mf$coef[4]) #com temps està en dies
+exp(30*mf$coef[4])
+exp(30*mf$coef[4])/(1+exp(30*mf$coef[4]))
+```
+Com les unitats de la variable temps son dies tenim que més dies de seguiment es relacionen amb una major probabilitat de que el pacient faci alguna visita. Un increment d'1 dia en els dies de seguiment suma 0.000817 als logodds i multiplica els odds per 1.000817, és a dir, incrementa els odds de fer una visita en un 0.0817%. Mirant-ho de manera mensual tenim que per un increment d'1 mes en el temps de seguiment s'incrementa les odds de fer una visita en 2.5%. Per tant, per cada mes que se està en estudi, es 1.025 cops més probable fer alguna visita respecte a no fer ninguna o *2.5% més probable fer alguna visita que no fer-la per cada increment d'1 mes en el temps d'estudi*
+
+
+Categòric
+```{r}
+mf$coef[5]
+exp(mf$coef[5])
+exp(mf$coef[5])/(1+exp(mf$coef[5]))
+```
+Els que si han tingut una visita prèvia abans de l'estudi, sels hi suma 0.599 als logodds respecte als que no tenen i multiplica els odds per 1.82, és a dir, els que han tingut una visita previa tenen 1.82 cops més probabilitats de fer alguna visita que els que no. *82% més probable fer alguna visita respecte a no fer-la quan s'ha fet una visita previa* 
+
+
+############################################################RECOMPTES
+# Recomptes
+
+## Modelització
+
+Com que la variable resposta és el nombre de visites realitzades en el temps de seguiment i aquest temps és diferent per a cada pacient, necesitarem l'**offset** (taxa de nombre de visites per temps de seguiment). Així doncs, incloem `offset(log(temps))` al model com a predictora.
+
+Amb l'anàlisi descriptiva i el model ajustat a resposta binaria sabem que com a mínim les variables sexe, temps, PAS i FEV s'hauran d'incloure en el model. I també tindrem l'interacció sexe:FEV
+### Selecció de variables
+
+Primer fem la selecció de variables per un model poisson.
+
+```{r}
+mod.r0 <- glm(n ~ sexe + visites_prev + FEV + edat + PAS + offset(log(temps)) +
+                sexe:visites_prev + sexe:FEV + sexe:edat + sexe:PAS + sexe:temps +
+                visites_prev:FEV + visites_prev:edat + visites_prev:PAS +
+                visites_prev:temps, family = poisson, dades)
+
+mod.r1 <- step(mod.r0, direction="both", k=2, trace=FALSE) #fem segons criteri AIC ja que busquem predictibilitat i no tant explicabilitat
+mod.r2 <- step(mod.r0, direction="both", k=log(nrow(dades)), trace=FALSE)
+Anova(mod.r1)
+Anova(mod.r2)
+```
+
+Agafarem model AIC on tenim resultat esperable a més que s'han afegit les interaccions de sexe amb edat i visites_prev (aquesta última no significativa) i de manera aditiva edat i visites_prev.
+
+
+### Poisson
+
+Ajustem les dades a un model poisson. I com veiem que interacció sexe:edat no significativa ajustarem també model sense aquesta interacció.
+
+```{r}
+mod.poisson0 <- glm(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:edat+sexe:visites_prev+
+                      offset(log(temps)), family = poisson, dades)
+Anova(mod.poisson0)
+mod.poisson1 <- glm(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                      offset(log(temps)), family = poisson, dades)
+AIC(mod.poisson0)
+AIC(mod.poisson1)
+BIC(mod.poisson0)
+BIC(mod.poisson1)
+```
+Com interacció surt no significativa i a més AIC son molt semblant però BIC millora si treiem interacció així que ens quedem amb model sense interacció
+```{r}
+library(AER)
+dispersiontest(mod.poisson1, trafo = 1)  # V(Y) = (1+alpha)*mu    --> Y Quasi Poissson
+dispersiontest(mod.poisson1, trafo = 2)  # V(Y) = mu + alpha*mu^2 --> Y Bin Neg
+```
+
+Amb `trafo=1` fem el test per la relació lineal i amb `trafo=2`per la relació quadràtica. Veiem que el model té dispersió. Com que ambdós p-valors són menors que 0.05, provarem d'ajustar les dades amb un model binomial negatiu, ja que és més flexible que el quasi-poisson.
+
+### Binomial negativa
+
+```{r}
+library(MASS)
+mod.nb0  <- glm.nb(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                      offset(log(temps)), dades)
+summary(mod.poisson1)
+summary(mod.nb0)
+Anova(mod.nb0)
+```
+
+Els coeficients son semblants a la Poisson però els errors estandards són superiors en el cas de la binomial negativa. Com ara surt interacció no significativa, treurem l'interacció sexe:FEV
+
+```{r}
+mod.nb1  <- glm.nb(n ~ sexe + visites_prev + FEV + edat + PAS +sexe:visites_prev+
+                      offset(log(temps)), dades)
+Anova(mod.nb1)
+```
+
+
+Avaluem la bondat de l'ajust amb l'estadístic de Pearson.
+
+```{r}
+(X2P <- sum(resid(mod.nb1,type="pearson")^2))
+1 - pchisq(X2P,mod.nb0$df.residual)
+```
+
+Segons l'estadísitic, el model és vàlid.
+
+
+## Validació
+
+```{r}
+residualPlot(mod.nb1, layout=c(2,2))
+residualPlot(mod.nb0, layout=c(2,2))
+```
+
+
+```{r}
+
+library(pscl)
+# Ajustar un modelo Zero-Inflated Poisson
+#modelo_zip <- zeroinfl(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+#                      offset(log(temps)) | 1, data = dades)
+#summary(modelo_zip)
+
+# Ajustar un modelo Zero-Inflated Negative Binomial
+#modelo_zinb <- zeroinfl(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+ #                     offset(log(temps)) | 1, dist = "negbin", data = dades)
+
+library(glmmTMB)
+
+mzip <- glmmTMB(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                      offset(log(temps)),data=dades,
+                  zi=~sexe,family=poisson)
+mzinb <- glmmTMB(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                      offset(log(temps)),data=dades,
+                  zi=~sexe ,family=nbinom2)
+
+
+AIC(mzip)
+AIC(mzinb)
+AIC(mod.poisson1)
+AIC(mod.nb0)
+AIC(mod.nb1)
+print("***********************")
+BIC(mzip)
+BIC(mzinb)
+BIC(mod.poisson1)
+BIC(mod.nb0)
+BIC(mod.nb1)
+```
+Millor zip de tots els models
+
+```{r}
+tabla_observada <- table(dades$n == 0)
+
+# Predicción de ceros bajo Poisson
+predicciones <- predict(mod.poisson1, type = "response")
+ceros_esperados <-  sum(dpois(0, lambda = predicciones))
+  #sum(dnbinom(0, size = mod.nb1$theta, mu = predicciones))
+
+# Comparar
+print(tabla_observada)
+print(ceros_esperados)
+
+#Nomes per comprobar si necessari model zero inflat
+modelo_zip <- zeroinfl(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                     offset(log(temps)) | sexe, data = dades)
+vuong(mod.poisson1,modelo_zip)
+#vuong(mod.nb1, modelo_zinb) #sla emejor modelo zinflado
+#vuong(mod.nb1,modelo_zip)
+```
+
+```{r,warning=F}
+#Anova(modelo_zinb,component="cond")
+#Anova(modelo_zinb2,component="zi")
+#modelo_zinb2 <- zeroinfl(n ~ sexe  + FEV + edat + PAS + sexe:FEV+
+  #                    offset(log(temps)) | sexe +visites_prev +FEV + edat + PAS + #sexe:FEV+sexe:visites_prev+
+ #                     offset(log(temps)), dist = "negbin", data = dades)
+#Anova(modelo_zinb2,component="cond")
+```
+
+Mejor zero inflado
+
+
+## Selecció de variables
+
+```{r}
+mzip1 <- glmmTMB(n ~ sexe + visites_prev + FEV + edat + PAS +sexe:visites_prev+
+                      offset(log(temps)),data=dades,
+                  zi=~sexe,family=poisson)
+Anova(mzip1,component="cond")
+Anova(mzip1,component="zi")
+#residualPlot(mzip1)
+```
+
+Tot és significatiu.
+
+```{r}
+#afegim variables
+mzip1.1 <- glmmTMB(n ~ sexe + visites_prev + FEV + edat + PAS +sexe:visites_prev+
+                      offset(log(temps)),data=dades,
+                  zi=~sexe + visites_prev,family=poisson)
+Anova(mzip1.1,component="cond")
+Anova(mzip1.1,component="zi")
+```
+
+- visites_prev no significativa
+
+```{r}
+#afegim variables
+mzip1.2 <- glmmTMB(n ~ sexe + visites_prev + FEV + edat + PAS +sexe:visites_prev+
+                      offset(log(temps)),data=dades,
+                  zi=~sexe + edat,family=poisson)
+Anova(mzip1.2,component="cond")
+Anova(mzip1.2,component="zi")
+```
+
+- edat no significativa
+
+```{r}
+#afegim variables
+mzip1.3 <- glmmTMB(n ~ sexe + visites_prev + FEV + edat + PAS +sexe:visites_prev+
+                      offset(log(temps)),data=dades,
+                  zi=~sexe + sexe:visites_prev,family=poisson)
+Anova(mzip1.3,component="cond")
+Anova(mzip1.3,component="zi")
+```
+
+- interacció sexe:visites_fev tampoc és significativa
+
+
+
+```{r}
+mzip2 <- zeroinfl(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                     offset(log(temps)) | sexe, data=dades)
+AIC(mzip2)
+BIC(mzip2)
+```
+
+```{r}
+mzip2.1 <- zeroinfl(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                     offset(log(temps)) | sexe + FEV, data=dades)
+AIC(mzip2.1)
+BIC(mzip2.1)
+```
+
+- AIC i BIC més grans
+
+```{r}
+mzip2.2 <- zeroinfl(n ~ sexe + visites_prev + FEV + edat + PAS + sexe:FEV+sexe:visites_prev+
+                     offset(log(temps)) | sexe + PAS, data=dades)
+AIC(mzip2.2)
+BIC(mzip2.2)
+```
+
+
+
+## Capacitat predictiva
+
+```{r}
+pr <- predict(mzip1,type='response')/dades$temps
+obs<-dades$n/dades$temps
+pr2<-predict(mod.nb1,type='response')/dades$temps
+par(mfrow=c(1,2))
+plot(pr,obs,main="Escala additiva",xlab='Predit',ylab='Observat');abline(0,1,col=2)
+plot(pr+0.1,obs+0.1,log='xy',main="Escala multiplicativa",xlab='Predit',ylab='Observat');abline(0,1,col=2)
+plot(pr2,obs,main="Escala additiva",xlab='Predit',ylab='Observat');abline(0,1,col=2)
+plot(pr2+0.1,obs+0.1,log='xy',main="Escala multiplicativa",xlab='Predit',ylab='Observat');abline(0,1,col=2)
+```
+
+
+Complicar el model.
+
+
+```{r}
+mzip2 <- glmmTMB(n ~ sexe*FEV+temps+visites_prev+offset(log(temps)),data=dades,
+                  zi=~sexe 
+                      ,family=poisson)
+Anova(mzip2,component="cond")
+Anova(mzip2,component="zi")
+```
+
+```{r}
+mzip3 <- glmmTMB(n ~ sexe+FEV+temps+visites_prev+offset(log(temps)),data=dades,
+                  zi=~sexe 
+                      ,family=poisson)
+Anova(mzip3,component="cond")
+#Anova(mzip,component="zi")
+```
+
+```{r}
+mzip4 <- glmmTMB(n ~ sexe+FEV+visites_prev+PAS+offset(log(temps)),data=dades,
+                  zi=~sexe 
+                      ,family=poisson)
+Anova(mzip4,component="cond")
+Anova(mzip4,component="zi")
+```
+
+```{r}
+mzip5 <- glmmTMB(n ~ sexe+FEV+visites_prev+edat+PAS+offset(log(temps)),data=dades,
+                  zi=~sexe +offset(log(temps))
+                      ,family=poisson)
+Anova(mzip5,component="cond")
+Anova(mzip5,component="zi")
+```
+
+```{r}
+mzip6 <- glmmTMB(n ~ sexe*edat+FEV+visites_prev+PAS+offset(log(temps)),data=dades,
+                  zi=~sexe +offset(log(temps))
+                      ,family=poisson)
+Anova(mzip6,component="cond")
+Anova(mzip6,component="zi")
+```
+
+```{r}
+mzip7 <- glmmTMB(n ~ sexe*PAS+edat+FEV+visites_prev+offset(log(temps)),data=dades,
+                  zi=~sexe +offset(log(temps))
+                      ,family=poisson)
+Anova(mzip7,component="cond")
+Anova(mzip7,component="zi")
+```
+
+```{r}
+mzip8 <- glmmTMB(n ~ sexe*PAS+edat+FEV*visites_prev+offset(log(temps)),data=dades,
+                  zi=~sexe +offset(log(temps))
+                      ,family=poisson)
+Anova(mzip8,component="cond")
+Anova(mzip8,component="zi")
+```
+
+```{r}
+mzip9 <- glmmTMB(n ~ sexe*PAS+FEV+edat*visites_prev+offset(log(temps)),data=dades,
+                  zi=~sexe +offset(log(temps))
+                      ,family=poisson)
+Anova(mzip9,component="cond")
+Anova(mzip9,component="zi")
+
+mzipdf<-mzip7
+```
+
+No convergeix perquè és massa complex. De moment millor model zip mzipdf
+
+```{r,warning=F}
+mzip10 <- glmmTMB(n ~ sexe*PAS+FEV+edat+visites_prev+offset(log(temps)),data=dades,
+                  zi=~sexe+PAS +offset(log(temps))
+                      ,family=poisson)
+```
+
+
+
+
+
+
+
+## Interpretació
+
+```{r}
+library("multcomp")
+library(emmeans)
+cld(emmeans(mzip1, ~FEV|sexe,type="response"))
+```
+
+
+EQM
+
+```{r}
+EQM <- sum((pr-dades$n)^2)/length(pr) # Error quadratic mitja
+sqrt(EQM)
+sd(dades$n)
+```
+
+
+
+```{r}
+pr <- predict(mod.nb1,type='response')
+par(mfrow=c(1,2))
+plot(pr,dades$n,main="Escala aditiva",xlab='Predit',ylab='Observat');abline(0,1,col=2)
+plot(pr+0.1,dades$n+0.1,log='xy',main="Escala multiplicativa",xlab='Predit',ylab='Observat');abline(0,1,col=2)
+```
+
+```{r}
+mod.nb1  <- glm.nb(n ~ sexe + visites_prev + FEV + edat + PAS +sexe:visites_prev+
+                      offset(log(temps)), dades)
+pr <- predict(mzip1,type='response')/dades$temps
+obs<-dades$n/dades$temps
+pr2<-predict(mod.nb1,type='response')/dades$temps
+sum((pr-obs)^2)/length(pr)
+sum((pr2-obs)^2)/length(pr)
+sum((pr2-pr)^2)/length(pr)
+```
+
+```{r}
+mod.poissonnulo <- glm(n ~ 1, family = poisson, dades)
+mod.nbnul<-glm.nb(n ~ 1, dades)
+mod.zipn<-glmmTMB(n ~ 1,data=dades,
+                  zi=~sexe 
+                      ,family=poisson)
+mod.zibn<-glmmTMB(n ~ 1,data=dades,
+                  zi=~1 
+                      ,family=nbinom2)
+deviance(mod.poissonnulo)
+deviance(mod.nbnul)
+deviance(mod.zipn)
+deviance(mod.zibn)
+```
