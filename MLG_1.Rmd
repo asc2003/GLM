@@ -1,0 +1,235 @@
+---
+title: "Untitled"
+output:
+  html_document: default
+  pdf_document: default
+date: "2024-10-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Per l'enunciat sabem que segueix una distribució gamma ja que funció de variància és $\mu^2$ i també sabem que el link es invers ja que $g(\mu)=\frac{1}{\mu}$
+
+# Lectura de dades
+
+```{r}
+dades<-read.csv2("./SOLER CARBALLO, Àlex.csv",header=T,stringsAsFactors = TRUE)
+colnames(dades)[2]<-"Temps"
+#dades$Temps<-as.factor(dades$Temps)
+```
+
+# Evolució VitC només tenint en compte el Temps
+
+# Descriptiva
+```{r}
+library("car")
+sp(VitC ~ Temps, boxplot=FALSE, smooth=FALSE, dades)
+```
+# Model glm A amb VitC~Temps
+
+```{r}
+library(car)
+glmA <- glm(VitC ~ Temps, family=Gamma(link=inverse),dades)
+glmA0<-glm(VitC~1,family=Gamma(link=inverse),dades)
+summary(glmA)
+anova(glmA0,glmA,test="F") #don p-valor>>>0.1, per tant, ens quedariem amb m10
+Anova(glmA,test="F") #contribució marginal, es veu que Temps no contribueix (pvalor>>>>0.1)
+```
+
+## 1) Paràmetre de dispersió
+```{r}
+signif(summary(glmA)$dispersion,5)
+```
+
+## 2) Quan T=0, estimacio predictor lineal és
+type="link"
+```{r}
+pred_link <- predict.glm(object  = glmA,
+                     newdata = data.frame(Temps=0),
+                     se.fit  = TRUE, #aqui diem que ens calculi IC (aixo per mitjana)
+                     type    = "link")
+signif(pred_link$fit,5)
+```
+
+## 3) Quan T=0, estimacio parametre canònic theta és
+
+```{r}
+signif(-pred_link$fit,5)
+```
+## 4) Estimacio E(VitC|T=47) ha donat:
+"response"
+```{r}
+pred_response <- predict.glm(object  = glmA,
+                     newdata = data.frame(Temps=47),
+                     se.fit  = TRUE, #aqui diem que ens calculi IC (aixo per mitjana)
+                     type    = "response")
+signif(pred_response$fit,5)
+```
+## 5) Estimació Var(VitC|T=47)=dispersio*V(mu_i) ha donat:
+
+```{r}
+signif(summary(glmA)$dispersio*pred_response$fit^2,5)
+```
+
+# Model glmB amb VitC~Tract+Temps
+```{r}
+glmB <- glm(VitC ~ Tract+Temps, family=Gamma(link=inverse),dades)
+summary(glmB)
+```
+## 6) Paràmetre de dispersió
+```{r}
+signif(summary(glmB)$dispersion,5)
+```
+
+## 7) Quan T=65 i Tract=b, l’estimació del predictor lineal és: 
+type="link"
+```{r}
+pred_linkB <- predict.glm(object  = glmB,
+                     newdata = data.frame(Tract="b",Temps=65),
+                     se.fit  = TRUE, #aqui diem que ens calculi IC (aixo per mitjana)
+                     type    = "link")
+signif(pred_linkB$fit,5)
+```
+
+
+## 8) E(VitC|T=65,Tract=b) és
+type="response"
+```{r}
+pred_responseB <- predict.glm(object  = glmB,
+                     newdata = data.frame(Tract="b",Temps=65),
+                     se.fit  = TRUE, #aqui diem que ens calculi IC (aixo per mitjana)
+                     type    = "response")
+signif(pred_responseB$fit,5)
+```
+## 9) L’estimació de la desviació tipus S(VitC|T=65,Tract=b) és
+```{r}
+signif(sqrt(summary(glmB)$dispersio*pred_responseB$fit^2),5)
+```
+
+## 10) Valor deviància model glmB
+```{r}
+signif(summary(glmB)$deviance,5)
+```
+
+# Model glmC VitC~Tract*Temps
+
+```{r}
+glmC <- glm(VitC ~ Tract*Temps, family=Gamma(link=inverse),dades)
+summary(glmC)
+```
+
+## 11) Paràmetre de dispersió
+```{r}
+signif(summary(glmC)$dispersion,5)
+```
+## 12) Valor estadístic de contrast per comparar glmB amb glmC és
+Per calcular-ho manualment seria
+((summary(glmB)$deviance-summary(glmC)$deviance)/summary(glmC)$dispersion)/(8-5)
+```{r}
+#Per calcular-ho manualment seria
+#((summary(glmB)$deviance-summary(glmC)$deviance)/summary(glmC)$dispersion)/(8-5)
+((summary(glmB)$deviance-summary(glmC)$deviance)/summary(glmC)$dispersion)/(8-5) #on 8 numero params glmC i 5 numeros params glmB
+anova(glmB,glmC,test="F")
+signif(anova(glmB,glmC,test="F")$F[2],5)
+```
+## 13)  Quan T=56 i Tract=a, l’extrem superior de l’interval de confiança (95%) del predictor lineal és (aproximació Normal)
+```{r}
+pred_linkC <- predict.glm(object  = glmC,
+                     newdata = data.frame(Tract="a",Temps=56),
+                     se.fit  = TRUE, 
+                     type    = "link")
+signif(pred_linkC$fit+qnorm(0.975)*pred_linkC$se.fit,5)
+```
+
+## 14) L’extrem inferior de l’interval de confiança (95%) de E(VitC|T=56,Tract=a) és (aproximació t-Student)
+```{r}
+df<-glmC$df.residual
+pred_responseC <- predict.glm(object  = glmC,
+                     newdata = data.frame(Tract="a",Temps=56),
+                     se.fit  = TRUE, 
+                     type    = "response")
+
+signif(pred_responseC$fit - qt(0.975,df) * pred_responseC$se.fit,5)
+```
+
+# Model glmD VitC~Tract*Temps pero que tingui en compte que quan T=0 tractament no ha pogut tenir efecte sobre VitC, és a dir, que els paràmetres Beta0,i son tots quatre iguals
+```{r}
+glmD<-glm(VitC~Temps+Tract:Temps,family=Gamma(link=inverse),dades)
+summary(glmD)
+```
+## 15) Paràmetre de dispersió
+```{r}
+signif(summary(glmD)$dispersion,5)
+```
+
+## 16) Valor estadístic de contrast per comparar glmC amb glmD es
+```{r}
+signif(anova(glmC,glmD,test="F")$F[2],5)
+```
+
+## 17) E(VitC|T=39,Tract=b)
+```{r}
+pred_responseD <- predict.glm(object  = glmD,
+                     newdata = data.frame(Tract="b",Temps=39),
+                     se.fit  = TRUE, 
+                     type    = "response")
+pred_responseD$fit
+```
+
+## 18) Quan Tract=b, el pendent del predictor lineal respecte a T és
+```{r}
+a<-summary(glmD)$coefficients
+signif(a[2,1]+a[3,1],5)
+```
+
+## 19) Escolliu entre glmC i glmD, el model que considereu millor per a les vostres dades.
+```{r}
+anova(glmD,glmC,test="F") #surt pvalor significatiu per tant agafarem model mes complet que es glmC
+```
+
+## 20) Quin es el pvalor del test que heu contrastat per contestar la pregunta anterior
+```{r}
+signif(anova(glmC,glmD,test="F")$`Pr(>F)`[2],5)
+```
+
+## 21) M pertany {a,b,c,d}. El tractament en el que ha sortit que la VitC baixa més ràpidament es
+```{r}
+library(emmeans)
+library(multcomp)
+(emmC  <- emmeans(glmC, ~Tract*Temps, type = "response"))
+cld(emmC, Letters=letters,reversed = TRUE) #veiem que d-c; c-a; a-b
+#el que tiene una respuesta más baja es el tratamiento b, pero vemos que a y b pertenecen al mismo grupo, por tanto no hay diferencia estadistica y podriamos elegir que cualquiera de los dos es el mas bajo
+```
+
+Aqui estem calculan les tendencies (pendent) pels diferents tractaments. Com nosaltres tenim que mu=1/model, llavors haurem d'agafar el trends mes alt pq farà la fracció més petita.
+En aquest cas es el a
+```{r}
+emtrends(glmC,"Tract",var="Temps")
+```
+
+## 22)  Anomenem 𝑚𝜖{𝑎, 𝑏, 𝑐, 𝑑} el tractament en que la E(VitC|T=84, Tract=m) ha sortit més baixa. En aquest cas E(VitC|T=84, Tract=m)
+utilitzem el resultat anterior, ja que pregunta el que ha sortit més baix, com parteixen del mateix lloc tenim que el que baixi més ràpidament serà el que tingui més baix
+```{r}
+pred_responseC1 <- predict.glm(object  = glmC,
+                     newdata = data.frame(Tract="a",Temps=84),
+                     se.fit  = TRUE, 
+                     type    = "response")
+pred_responseC2 <- predict.glm(object  = glmC,
+                     newdata = data.frame(Tract="b",Temps=84),
+                     se.fit  = TRUE, 
+                     type    = "response")
+pred_responseC3 <- predict.glm(object  = glmC,
+                     newdata = data.frame(Tract="c",Temps=84),
+                     se.fit  = TRUE, 
+                     type    = "response")
+pred_responseC4 <- predict.glm(object  = glmC,
+                     newdata = data.frame(Tract="d",Temps=84),
+                     se.fit  = TRUE, 
+                     type    = "response")
+dataf<-data.frame(Tract=c("a","b","c","d"),Valor=c(pred_responseC1$fit,pred_responseC2$fit,pred_responseC3$fit,pred_responseC4$fit))
+dataf[which.min(dataf$Valor),]
+signif(dataf[which.min(dataf$Valor),2],5)
+```
+
