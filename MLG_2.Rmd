@@ -1,0 +1,247 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-11-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Lectura de dades
+
+```{r}
+dades<-read.csv2("./SOLER CARBALLO, Àlex.csv",header=T,stringsAsFactors = TRUE)
+
+```
+- Utilitzar residuos deviancia que son els que utilitza R per defecte
+- Utilitzar l'estimació de Pearson per al paràmetre de dispersió que és el que utilitza R per defecte
+-  La variable x és una covariable, però com que a cada valor de la x hi ha repeticions de la y ,
+ocasionalment també es pot utilitzar la x com a factor per poder contrastar alguns tests, com el de
+Levene o el test de comparar el model que tenim amb el model resultat de afegir-hi x com a factor.
+Aquests tests us poden ser útils per analitzar el comportament dels models del vostre exercici. 
+
+# A. Plantegeu, ajusteu i analitzeu el model Mod1 
+Link identitat, distribució Normal
+```{r}
+mod1<-glm(y ~ log(x), family=gaussian(link="log"),dades)
+summary(mod1)
+```
+
+## 1) La deviància ha donat
+```{r}
+
+signif(summary(mod1)$deviance,5)
+```
+
+## 2) Escollir opció correcte
+```{r}
+library(car)
+dades2<-dades
+dades2$xlog<-log(dades2$x)
+dades2$x<-as.factor(dades2$x)
+dades2$xlog<-as.factor(dades2$xlog)
+mod1fac<-glm(y ~ xlog, family=gaussian(link="log"),dades2)
+anova(mod1,mod1fac,test="F")
+```
+Amb els gràfics veiem dues coses: la linea no es central al 0 quan comparem predits vs residuos, per tant, el link no es correcte --> model no ajusta bé les dades. També veiem com no hi ha homocedasticitat, per tant, la  funció de variancia no es correcte, tenim que la variancia residuos no és lineal sino quadràtica
+
+d) Estem segurs que el model no ajusta bé les dades
+
+## 3) Escolliu l'opció correcte
+```{r}
+
+leveneTest(resid(mod1fac,type="deviance"), dades2$xlog)
+```
+Surten que les variancies no son iguals, per tant, variancia no constant
+
+d) Estem segurs que Mod1 no compleix la funció de variància
+
+# B. Plantegeu, ajusteu i analitzeu el model Mod2
+```{r}
+mod2<-glm(y ~ x, family=gaussian(link=inverse),dades)
+summary(mod2)
+X  <- 50:150
+pprod <- predict(mod2, data.frame(x=X), type="response")
+
+plot(y ~ x, dades, pch=3,ylim=c(0,max(pprod,dades$y)),
+     xlab="dies",ylab="litres/dia",
+     main="Producció de llet")
+lines(X,pprod,col="red")
+abline(h=0,col="gray",lwd=2)
+```
+
+
+## 4) L'estadístic de dispersió ha donat
+```{r}
+signif(summary(mod2)$dispersion,5)
+```
+
+## 5) Escolliu opció correcte
+```{r}
+mod2fac<-glm(y ~ x, family=gaussian(link=inverse),dades2)
+anova(mod2,mod2fac,test="F")
+plot(mod2)
+```
+d) Estem segurs que Mod2 no ajusta bé les dades
+
+## 6) Escolliu opció correcte
+```{r}
+leveneTest(resid(mod2fac),dades2$x)
+```
+
+d) Estem segur que Mod2 no compleix la funció de variancia
+
+# C) Plantegeu, ajusteu i analitzeu el model mod3
+```{r}
+mod3<-glm(y ~ log(x), family=Gamma(link="log"),dades)
+summary(mod3)
+plot(mod3)
+X  <- 50:150
+pprod <- predict(mod3, data.frame(x=X), type="response")
+
+plot(y ~ x, dades, pch=3,ylim=c(0,max(pprod,dades$y)),
+     xlab="dies",ylab="litres/dia",
+     main="Producció de llet")
+lines(X,pprod,col="red")
+abline(h=0,col="gray",lwd=2)
+```
+
+## 7) L'intercept ha donat
+```{r}
+
+signif(summary(mod3)$coef[1,1],5)
+```
+
+
+## 8) Escolliu l'opció correcte
+```{r}
+mod3fac<-glm(y ~ xlog, family=Gamma(link="log"),dades2)
+anova(mod3,mod3fac,test="F")
+```
+a)
+
+## 9) Escolliu l'opció correcte
+```{r}
+leveneTest(resid(mod3fac),dades2$xlog)
+```
+a)
+
+# D) Plantegeu, ajusteu i analitzeu el model mod4
+```{r}
+mod4<-glm(y ~ x, family=Gamma(link=inverse),dades)
+summary(mod4)
+plot(mod4)
+```
+
+## 10) L'error estàndard del coeficient de la covariable ha donat
+```{r}
+signif(summary(mod4)$coef[2,2],5)
+```
+
+## 11) Escolliu l'opció correcte
+```{r}
+mod4fac<-glm(y ~ x, family=Gamma(link=inverse),dades2)
+anova(mod4,mod4fac,test="F")
+```
+d)
+
+## 12) Escolliu l'opció correcte
+```{r}
+leveneTest(resid(mod4fac),dades2$x)
+```
+
+a)
+
+# E) Plantegeu, ajusteu i analitzeu el model mod5
+```{r}
+mod5<-glm(y ~ x, family=inverse.gaussian(link=inverse),dades)
+summary(mod5)
+plot(mod5)
+```
+
+## 13) La deviància del model nul ha donat
+```{r}
+signif(summary(mod5)$null.deviance,5)
+```
+## 14) Escolliu l'opció correcte
+```{r}
+mod5fac<-glm(y ~ x, family=inverse.gaussian(link=inverse),dades2)
+anova(mod5,mod5fac,test="F")
+```
+d)
+
+## 15) Escolliu l'opció correcte
+```{r}
+leveneTest(resid(mod5fac),dades2$x)
+```
+d)
+
+# F) Compareu els 5 models anteriors
+
+## 16) Quin valor té la log-versemblança més alta dels 5 models
+```{r}
+lk<-c(as.numeric(logLik(mod1)),as.numeric(logLik(mod2)),as.numeric(logLik(mod3)),as.numeric(logLik(mod4)),as.numeric(logLik(mod5)))
+lk
+signif(max(lk),5) #mod3
+```
+
+## 17) En quin model hem obtingut R^2 més elevat
+```{r}
+(summary(mod1)$null.deviance-summary(mod1)$deviance)/summary(mod1)$null.deviance
+
+(summary(mod2)$null.deviance-summary(mod2)$deviance)/summary(mod2)$null.deviance
+
+(summary(mod3)$null.deviance-summary(mod3)$deviance)/summary(mod3)$null.deviance
+
+(summary(mod4)$null.deviance-summary(mod4)$deviance)/summary(mod4)$null.deviance
+
+(summary(mod5)$null.deviance-summary(mod5)$deviance)/summary(mod5)$null.deviance
+
+```
+
+c) Mod3
+
+## 18)
+c) Mod3
+
+
+# G) Amb el model adequat fer calculs necessaris
+Pillamos 3
+
+## 19) predictor lineal quan x=136
+```{r}
+signif(predict(mod3,data.frame(x=136),type="link"),5)
+```
+
+
+## 20) valor predit de y quan x=136
+```{r}
+signif(predict(mod3,data.frame(x=136),type="response"),5)
+```
+
+## 21)
+```{r}
+signif(exp(4.8665),5)
+```
+
+## 22)DUDA
+```{r}
+prer<-predict(mod3,data.frame(x=136),se.fit=TRUE,type="response")
+signif(summary(mod3)$dispersion*prer$fit^2,5) #esto es para individuo concreto
+```
+
+
+## 23)DUDA
+```{r}
+signif(prer$se.fit^2,5) #este es para todos los individuos
+```
+
+
+
+## 24)
+```{r}
+plot(mod3)
+sum(abs(rstudent(mod3))>2)
+```
+
